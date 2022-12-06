@@ -1,0 +1,280 @@
+---
+title: "Got"
+output: html_document
+date: "2022-12-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Departing from the script provided by Adela i have made a simple remoddeling to adopt it for Game of thrones a song of ice and fire.
+
+The first step remains loading all the necessary libraies as well as the lexicons used for the sentiment analyses. 
+
+
+```{r}
+library(tidyverse)
+library(here)
+library(pdftools)
+library(tidytext)
+library(textdata)
+library(ggwordcloud)
+get_sentiments(lexicon = "nrc")
+get_sentiments(lexicon = "afinn")
+```
+
+You will be prompted to accept the download of the two lexicons in the console, simply type "1" in the console to accept.
+
+Next we get the text:
+
+```{r get-document}
+got_path <- here("data","got.pdf")
+got_text <- pdf_text(got_path)
+```
+
+The document should appear in your files from now on, which can also be opend as PDF for reading and checking if it was loaded properly.
+
+As an extention of that we have the following code below to see what was written on page nine of the book. This may function as a way of spot checking. 
+
+```{r single-page}
+got_p9 <- got_text[9]
+got_p9
+```
+
+
+Next we are modifying the text. We can't do much data wrangeling when the text is in its original form. Therefore we spit each line by "//n" and mutate it as a new object "got_df".
+
+```{r split-lines}
+got_df <- data.frame(got_text) %>% 
+  mutate(text_full = str_split(got_text, pattern = '\\n')) %>% 
+  unnest(text_full) %>% 
+  mutate(text_full = str_trim(text_full)) 
+```
+
+Next we split the sentences into individual words or tokens with the following code:
+
+```{r tokenize}
+got_tokens <- got_df %>% 
+  unnest_tokens(word, text_full)
+```
+
+Let's count the words!
+```{r count-words}
+got_wc <- got_tokens %>% 
+  count(word) %>% 
+  arrange(-n)
+got_wc
+```
+
+Checking the got_wc there will be a lot of boring sentence structuring words such as "the", "a", "and" and so forth so now we apply a stopwords list.
+
+```{r stopwords}
+got_stop <- got_tokens %>% 
+  anti_join(stop_words) %>% 
+  select(-got_text)
+```
+
+This list simply reads word for word from beginning to finish as we can see the list starts with: "game (of) thrones (a) book, (a) song (of) ice (and) fire" with every () marking a word removed by the stopword list
+
+Now we check the counts again: 
+```{r count-words2}
+got_swc <- got_stop %>% 
+  count(word) %>% 
+  arrange(-n)
+```
+
+Now we have a wordcount of all the non filler words which considerably reduces the total of observations.
+
+What if we want to get rid of all the numbers (non-text) in `got_stop`?
+This code will filter out numbers by asking:
+If you convert to as.numeric, is it NA (meaning those words)?
+If it IS NA (is.na), then keep it (so all words are kept)
+Anything that is converted to a number is removed
+There will also be a tiny red line telling you that NAs have been added by coercion which is what we want
+
+So anything that is a number will be converted to a NAs to be safely ignored
+
+```{r skip-numbers}
+got_no_numeric <- got_stop %>% 
+  filter(is.na(as.numeric(word)))
+```
+
+Now we can get all the unique words counted and sorted so we have top 100 words.
+
+```{r wordcloud-prep}
+length(unique(got_no_numeric$word))
+
+got_top100 <- got_no_numeric %>% 
+  count(word) %>% 
+  arrange(-n) %>% 
+  head(100)
+```
+
+This is usefull to get a general feel of the book, but in our case we are more interested in visualizing it, the following code creates a plain visualization of most common words:
+
+```{r wordcloud}
+got_cloud <- ggplot(data = got_top100, aes(label = word)) +
+  geom_text_wordcloud() +
+  theme_minimal()
+
+got_cloud
+```
+
+As said plain so we add colours 
+
+```{r wordcloud-pro}
+ggplot(data = got_top100, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(aes(color = n), shape = "diamond") +
+  scale_size_area(max_size = 12) +
+  scale_color_gradientn(colors = c("darkgreen","blue","red")) +
+  theme_minimal()
+```
+
+This could also be a way of checking the stopword list, I would think the "i'm" should be added
+
+
+Now we finally reach the real purpose of the all this code: sentiment analys. To do that, we use the two downloaded libraries afinn and nrc. If you were going a little too fast in the beginning you might not have accepted the lexions, simply load the libraries code again and accept in the console.
+
+This code will show words valued at 3, 4 and 5 and show them in a tablet
+```{r afinn}
+afinn_pos <- get_sentiments("afinn") %>% 
+  filter(value %in% c(3,4,5))
+
+
+afinn_pos
+```
+
+Now nrc we look at a table of words and their numerical value from -5 to 5 associated different words:
+```{r nrc}
+get_sentiments(lexicon = "nrc")
+```
+
+Let's do sentiment analysis on the got text data using afinn, and nrc. 
+
+
+### Sentiment analysis with afinn:
+
+First, bind words in `got_stop` to `afinn` lexicon:
+```{r bind-afinn}
+got_afinn <- got_stop %>% 
+  inner_join(get_sentiments("afinn"))
+```
+
+Let's find some counts (by sentiment ranking) and plot them, the words will appear multiple times with their different sentiments.
+```{r count-afinn}
+got_afinn_hist <- got_afinn %>% 
+  count(value)
+
+# Plot them: 
+ggplot(data = got_afinn_hist, aes(x = value, y = n)) +
+  geom_col()
+```
+
+Investigate some of the words in a bit more depth, this may be used if we find a specific value to be abnormally low or high or a specif interest in non loaded words. In game of thrones there is a higher part of negative 2 than any other why is that?
+```{r afinn-2}
+# What are these '2' words?
+got_afinn2 <- got_afinn %>% 
+  filter(value == -2)
+```
+
+The following code makes a list of unique words valued at a negative 2 and plots them in order as to show the most common ones
+```{r afinn-2-more}
+# Check the unique 2-score words:
+unique(got_afinn2$word)
+
+# Count & plot them
+got_afinn2_n <- got_afinn2 %>% 
+  count(word, sort = TRUE) %>% 
+  mutate(word = fct_reorder(factor(word), n))
+
+
+ggplot(data = got_afinn2_n, aes(x = word, y = n)) +
+  geom_col() +
+  coord_flip()
+```
+
+looking at the different words it isn't quite as polarizing as the exemple  of "confidence" in Adelas submission skewering the general positivity in climate reports. I will focus on the word "fire" instead since it is the most frequently appering negative value and isn't necessarily a bad thing, especially in a medival setting where it is the only light source.
+
+Or we can summarize sentiment for the report: 
+```{r summarize-afinn}
+got_summary <- got_afinn %>% 
+  summarize(
+    mean_score = mean(value),
+    median_score = median(value)
+  )
+```
+
+The median scores ends at -1 which is probable for the book series famous for killing of important characters, but the sentiment might be valued too low since fire is over represented in a medieval setting.
+
+NRC
+We now do a sentiment analysis with NRC instead, which describes words in a category of 8 sentiments associated with some words instead of a numerical value
+
+```{r bind-bing}
+got_nrc <- got_stop %>% 
+  inner_join(get_sentiments("nrc"))
+```
+
+NRC excludes words that aren't loaded with sentiments, these can be viewed in the following code, maybe this list should be changed if you want a central word to the story to be included
+
+```{r check-exclusions}
+got_exclude <- got_stop %>% 
+  anti_join(get_sentiments("nrc"))
+
+# View(got_exclude)
+
+# Count to find the most excluded:
+got_exclude_n <- got_exclude %>% 
+  count(word, sort = TRUE)
+
+head(got_exclude_n)
+```
+most of the excluded words seem fair, especially names shouldn't be deciding factors, but "hand" as in "hand of the king" should maybe be loaded as an institutional position and at least be noticed.
+
+Now find some counts: 
+```{r count-bing}
+got_nrc_n <- got_nrc %>% 
+  count(sentiment, sort = TRUE)
+
+# And plot them:
+
+ggplot(data = got_nrc_n, aes(x = sentiment, y = n)) +
+  geom_col()
+```
+So now we have the most expressed feelings implicit in the text, the fact that trust is the most expressed seems fair since the first season was about Ned Stark being killed by the king since he trusted him or something, I haven't read it.
+
+Let us make list out of lists by splitting each sentiment into smaller graphs to see what words are the most common in each category
+```{r count-nrc}
+got_nrc_n5 <- got_nrc %>% 
+  count(word,sentiment, sort = TRUE) %>% 
+  group_by(sentiment) %>% 
+  top_n(5) %>% 
+  ungroup()
+
+got_nrc_gg <- ggplot(data = got_nrc_n5, aes(x = reorder(word,n), y = n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, ncol = 2, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(x = "Word", y = "count")
+
+# Show it
+got_nrc_gg
+
+# Save it
+ggsave(plot = got_nrc_gg, 
+       here("figures","got_nrc_sentiment.png"), 
+       height = 8, 
+       width = 5)
+
+```
+As said earlyier Adela focused on the word "confidence" in the climate reports I choose to focus on lord sinceit is the most common non filtered word from the book and on the top of muliple categories 
+
+```{r nrc-confidence}
+lord <- get_sentiments(lexicon = "nrc") %>% 
+  filter(word == "lord")
+
+# Yep, check it out:
+lord
+```
+Maybe the word "lord" should have more or less sentiments to it, maybe filter it if you don't want it to decide the sentiments outcome, but I will say it is fairly defining for the series so it I would leave it as is.
